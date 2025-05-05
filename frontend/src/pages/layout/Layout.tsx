@@ -1,12 +1,15 @@
 import { useContext, useEffect, useState } from 'react'
-import { Link, Outlet } from 'react-router-dom'
-import { Dialog, Stack, TextField } from '@fluentui/react'
+import { Link } from 'react-router-dom'
+import {Dialog,Stack,TextField,Pivot,PivotItem} from '@fluentui/react'
 import { CopyRegular } from '@fluentui/react-icons'
 
 import { CosmosDBStatus } from '../../api'
 import Contoso from '../../assets/Contoso.svg'
 import { HistoryButton, ShareButton } from '../../components/common/Button'
 import { AppStateContext } from '../../state/AppProvider'
+
+import Chat from '../chat/Chat'
+import Calendar from '../Calendar'
 
 import styles from './Layout.module.css'
 
@@ -94,7 +97,26 @@ const Layout = () => {
           </Stack>
         </Stack>
       </header>
-      <Outlet />
+
+      {/* 👇 TABS SECTION 👇 */}
+      <Pivot
+        styles={{
+          root: {
+            marginTop: '24px',
+            marginLeft: '24px',
+            padding: '0 16px'
+          }
+        }}
+      >
+        <PivotItem headerText="Chat Assistant">
+          <Chat />
+        </PivotItem>
+        <PivotItem headerText="Calendar">
+          <Calendar />
+        </PivotItem>
+      </Pivot>
+
+      {/* Share Dialog */}
       <Dialog
         onDismiss={handleSharePanelDismiss}
         hidden={!isSharePanelOpen}
