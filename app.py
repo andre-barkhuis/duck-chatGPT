@@ -34,7 +34,14 @@ from backend.utils import (
     format_non_streaming_response,
     convert_to_pf_format,
     format_pf_non_streaming_response,
+    init_openai_client,
+    init_cosmosdb_client,
 )
+from backend.events import extract_and_save_events_from_chat_history, get_events_for_user
+
+#Todo: Sepperate the frontend and backend API routes into different files
+# and use a router to register them
+
 
 bp = Blueprint("routes", __name__, static_folder="static", template_folder="static")
 
@@ -114,81 +121,6 @@ MS_DEFENDER_ENABLED = os.environ.get("MS_DEFENDER_ENABLED", "true").lower() == "
 azure_openai_tools = []
 azure_openai_available_tools = []
 
-# Initialize Azure OpenAI Client
-async def init_openai_client():
-    azure_openai_client = None
-    
-    try:
-        # API version check
-        if (
-            app_settings.azure_openai.preview_api_version
-            < MINIMUM_SUPPORTED_AZURE_OPENAI_PREVIEW_API_VERSION
-        ):
-            raise ValueError(
-                f"The minimum supported Azure OpenAI preview API version is '{MINIMUM_SUPPORTED_AZURE_OPENAI_PREVIEW_API_VERSION}'"
-            )
-
-        # Endpoint
-        if (
-            not app_settings.azure_openai.endpoint and
-            not app_settings.azure_openai.resource
-        ):
-            raise ValueError(
-                "AZURE_OPENAI_ENDPOINT or AZURE_OPENAI_RESOURCE is required"
-            )
-
-        endpoint = (
-            app_settings.azure_openai.endpoint
-            if app_settings.azure_openai.endpoint
-            else f"https://{app_settings.azure_openai.resource}.openai.azure.com/"
-        )
-
-        # Authentication
-        aoai_api_key = app_settings.azure_openai.key
-        ad_token_provider = None
-        if not aoai_api_key:
-            logging.debug("No AZURE_OPENAI_KEY found, using Azure Entra ID auth")
-            async with DefaultAzureCredential() as credential:
-                ad_token_provider = get_bearer_token_provider(
-                    credential,
-                    "https://cognitiveservices.azure.com/.default"
-                )
-
-        # Deployment
-        deployment = app_settings.azure_openai.model
-        if not deployment:
-            raise ValueError("AZURE_OPENAI_MODEL is required")
-
-        # Default Headers
-        default_headers = {"x-ms-useragent": USER_AGENT}
-
-        # Remote function calls
-        if app_settings.azure_openai.function_call_azure_functions_enabled:
-            azure_functions_tools_url = f"{app_settings.azure_openai.function_call_azure_functions_tools_base_url}?code={app_settings.azure_openai.function_call_azure_functions_tools_key}"
-            async with httpx.AsyncClient() as client:
-                response = await client.get(azure_functions_tools_url)
-            response_status_code = response.status_code
-            if response_status_code == httpx.codes.OK:
-                azure_openai_tools.extend(json.loads(response.text))
-                for tool in azure_openai_tools:
-                    azure_openai_available_tools.append(tool["function"]["name"])
-            else:
-                logging.error(f"An error occurred while getting OpenAI Function Call tools metadata: {response.status_code}")
-
-        
-        azure_openai_client = AsyncAzureOpenAI(
-            api_version=app_settings.azure_openai.preview_api_version,
-            api_key=aoai_api_key,
-            azure_ad_token_provider=ad_token_provider,
-            default_headers=default_headers,
-            azure_endpoint=endpoint,
-        )
-
-        return azure_openai_client
-    except Exception as e:
-        logging.exception("Exception in Azure OpenAI initialization", e)
-        azure_openai_client = None
-        raise e
 
 async def openai_remote_azure_function_call(function_name, function_args):
     if app_settings.azure_openai.function_call_azure_functions_enabled is not True:
@@ -205,37 +137,6 @@ async def openai_remote_azure_function_call(function_name, function_args):
     response.raise_for_status()
 
     return response.text
-
-async def init_cosmosdb_client():
-    cosmos_conversation_client = None
-    if app_settings.chat_history:
-        try:
-            cosmos_endpoint = (
-                f"https://{app_settings.chat_history.account}.documents.azure.com:443/"
-            )
-
-            if not app_settings.chat_history.account_key:
-                async with DefaultAzureCredential() as cred:
-                    credential = cred
-                    
-            else:
-                credential = app_settings.chat_history.account_key
-
-            cosmos_conversation_client = CosmosConversationClient(
-                cosmosdb_endpoint=cosmos_endpoint,
-                credential=credential,
-                database_name=app_settings.chat_history.database,
-                container_name=app_settings.chat_history.conversations_container,
-                enable_message_feedback=app_settings.chat_history.enable_feedback,
-            )
-        except Exception as e:
-            logging.exception("Exception in CosmosDB initialization", e)
-            cosmos_conversation_client = None
-            raise e
-    else:
-        logging.debug("CosmosDB not configured")
-
-    return cosmos_conversation_client
 
 
 def prepare_model_args(request_body, request_headers):
@@ -642,6 +543,13 @@ async def add_conversation():
                 )
         else:
             raise Exception("No user message found")
+
+        # Fetch recent messages for event extraction (e.g., last 10)
+        recent_messages = await current_app.cosmos_conversation_client.get_messages(user_id, conversation_id)
+        recent_messages = recent_messages[-10:] if len(recent_messages) > 10 else recent_messages
+
+        # Extract and save events/tasks using Azure OpenAI
+        await extract_and_save_events_from_chat_history(user_id, conversation_id, recent_messages)
 
         # Submit request to Chat Completions for response
         request_body = await request.get_json()
@@ -1055,6 +963,18 @@ async def generate_title(conversation_messages) -> str:
     except Exception as e:
         logging.exception("Exception while generating title", e)
         return messages[-2]["content"]
+
+
+@bp.route("/api/calendar/events", methods=["GET"])
+async def get_calendar_events():
+    logging.debug("get_calendar_events")
+    await cosmos_db_ready.wait()
+    authenticated_user = get_authenticated_user_details(request_headers=request.headers)
+    user_id = authenticated_user["user_principal_id"]
+    events = await get_events_for_user(user_id)
+    if not events:
+        return jsonify({"error": "No events found for user_id {user_Id}"}), 404
+    return jsonify(events)
 
 
 app = create_app()

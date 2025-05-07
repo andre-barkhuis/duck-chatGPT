@@ -1,5 +1,9 @@
 # Copilot Instructions
 - Always check TaskContext.md if you forget or need to think about the task. so you never forget
+
+## Clean Code Principles
+- Always adhear to SOLID and Clean code princiles. for example, single responsibility.
+
 ## ✅ Behavior
 
 - After saving a user message, extract events/tasks using Azure OpenAI (GPT-4o)
@@ -21,7 +25,6 @@
 - `frontend/src/api.ts`: Defines API call to `/api/calendar/events`
 - `frontend/src/Layout.tsx`: App layout wrapper and route shell
 - `.env`: Read-only, used for config (e.g., Azure model settings)
-
 ---
 
 ## 🔐 Access Rules
@@ -56,3 +59,5 @@ If documentation or file structure is unclear:
 - You can also use the following tools for live documentation:
   - `@context7 resolve-library-id`
   - `@context7 get-library-docs`
+
+

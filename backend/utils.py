@@ -3,10 +3,16 @@ import json
 import logging
 import requests
 import dataclasses
+import httpx
+from openai import AsyncAzureOpenAI
+from azure.identity.aio import DefaultAzureCredential, get_bearer_token_provider
+from backend.history.cosmosdbservice import CosmosConversationClient
 
 from typing import List
 
-DEBUG = os.environ.get("DEBUG", "false")
+#TODO: This file should be refactored into  multiple files based on the functionality, auth, openapi, cosmosdb, etc.
+
+DEBUG = os.environ.get("DEBUG", "true")
 if DEBUG.lower() == "true":
     logging.basicConfig(level=logging.DEBUG)
 
@@ -14,6 +20,7 @@ AZURE_SEARCH_PERMITTED_GROUPS_COLUMN = os.environ.get(
     "AZURE_SEARCH_PERMITTED_GROUPS_COLUMN"
 )
 
+USER_AGENT = "GitHubSampleWebApp/AsyncAzureOpenAI/1.0.0"
 
 class JSONEncoder(json.JSONEncoder):
     def default(self, o):
@@ -158,7 +165,6 @@ def format_stream_response(chatCompletionChunk, history_metadata, apim_request_i
 
     return {}
 
-
 def format_pf_non_streaming_response(
     chatCompletion, history_metadata, response_field_name, citations_field_name, message_uuid=None
 ):
@@ -205,7 +211,6 @@ def format_pf_non_streaming_response(
         logging.error(f"Exception in format_pf_non_streaming_response: {e}")
         return {}
 
-
 def convert_to_pf_format(input_json, request_field_name, response_field_name):
     output_json = []
     logging.debug(f"Input json: {input_json}")
@@ -223,10 +228,88 @@ def convert_to_pf_format(input_json, request_field_name, response_field_name):
     logging.debug(f"PF formatted response: {output_json}")
     return output_json
 
-
 def comma_separated_string_to_list(s: str) -> List[str]:
     '''
     Split comma-separated values into a list.
     '''
     return s.strip().replace(' ', '').split(',')
+
+async def init_openai_client():
+    from backend.settings import app_settings, MINIMUM_SUPPORTED_AZURE_OPENAI_PREVIEW_API_VERSION
+    azure_openai_client = None
+    try:
+        if (
+            app_settings.azure_openai.preview_api_version
+            < MINIMUM_SUPPORTED_AZURE_OPENAI_PREVIEW_API_VERSION
+        ):
+            raise ValueError(
+                f"The minimum supported Azure OpenAI preview API version is '{MINIMUM_SUPPORTED_AZURE_OPENAI_PREVIEW_API_VERSION}'"
+            )
+        if (
+            not app_settings.azure_openai.endpoint and
+            not app_settings.azure_openai.resource
+        ):
+            raise ValueError(
+                "AZURE_OPENAI_ENDPOINT or AZURE_OPENAI_RESOURCE is required"
+            )
+        endpoint = (
+            app_settings.azure_openai.endpoint
+            if app_settings.azure_openai.endpoint
+            else f"https://{app_settings.azure_openai.resource}.openai.azure.com/"
+        )
+        aoai_api_key = app_settings.azure_openai.key
+        ad_token_provider = None
+        if not aoai_api_key:
+            logging.debug("No AZURE_OPENAI_KEY found, using Azure Entra ID auth")
+            async with DefaultAzureCredential() as credential:
+                ad_token_provider = get_bearer_token_provider(
+                    credential,
+                    "https://cognitiveservices.azure.com/.default"
+                )
+        deployment = app_settings.azure_openai.model
+        if not deployment:
+            raise ValueError("AZURE_OPENAI_MODEL is required")
+        default_headers = {"x-ms-useragent": USER_AGENT}
+        azure_openai_client = AsyncAzureOpenAI(
+            api_version=app_settings.azure_openai.preview_api_version,
+            api_key=aoai_api_key,
+            azure_ad_token_provider=ad_token_provider,
+            default_headers=default_headers,
+            azure_endpoint=endpoint,
+        )
+        return azure_openai_client
+    except Exception as e:
+        logging.exception("Exception in Azure OpenAI initialization", e)
+        azure_openai_client = None
+        raise e
+
+async def init_cosmosdb_client(container_name: str = None):
+    from backend.settings import app_settings
+    cosmos_conversation_client = None
+    if app_settings.chat_history:
+        try:
+            cosmos_endpoint = (
+                f"https://{app_settings.chat_history.account}.documents.azure.com:443/"
+            )
+            if not app_settings.chat_history.account_key:
+                async with DefaultAzureCredential() as cred:
+                    credential = cred
+            else:
+                credential = app_settings.chat_history.account_key
+            # Use provided container_name or default to conversations_container
+            container = container_name or app_settings.chat_history.conversations_container
+            cosmos_conversation_client = CosmosConversationClient(
+                cosmosdb_endpoint=cosmos_endpoint,
+                credential=credential,
+                database_name=app_settings.chat_history.database,
+                container_name=container,
+                enable_message_feedback=app_settings.chat_history.enable_feedback,
+            )
+        except Exception as e:
+            logging.exception("Exception in CosmosDB initialization", e)
+            cosmos_conversation_client = None
+            raise e
+    else:
+        logging.debug("CosmosDB not configured")
+    return cosmos_conversation_client
 

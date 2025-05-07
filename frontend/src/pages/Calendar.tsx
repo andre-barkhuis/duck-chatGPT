@@ -1,71 +1,97 @@
-import React, { useContext, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Calendar, momentLocalizer, View } from 'react-big-calendar';
 import moment from 'moment';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
-import { AppStateContext } from '../state/AppProvider';
 import { Dialog, DialogType, Stack } from '@fluentui/react';
 
 const localizer = momentLocalizer(moment);
 const allViews: View[] = ['month', 'week', 'work_week', 'day', 'agenda'];
 
+// Type for events fetched from the backend
+interface CalendarTaskEvent {
+  user_id: string;
+  conversation_id: string;
+  description: string;
+  event_date: string; // ISO string
+  source_message_id?: string;
+  created_at?: string;
+}
+
 const CalendarView: React.FC = () => {
-  const appStateContext = useContext(AppStateContext);
-  const conversations = appStateContext?.state.chatHistory || [];
+  const [events, setEvents] = useState<CalendarTaskEvent[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<CalendarTaskEvent | null>(null);
 
-  const events = useMemo(
-    () =>
-      conversations.map(conv => {
-        let eventTitle = conv.title;
-        if (!eventTitle && conv.messages && conv.messages.length > 0) {
-          const firstUserMsg = conv.messages.find(m => m.role === 'user');
-          eventTitle = firstUserMsg ? (typeof firstUserMsg.content === 'string' ? firstUserMsg.content : '[Message]') : 'Conversation';
-        }
-        return {
-          title: eventTitle,
-          start: new Date(conv.date),
-          end: new Date(conv.date),
-          allDay: true,
-          conversationId: conv.id,
-          conversation: conv
-        };
-      }),
-    [conversations]
+  useEffect(() => {
+    const fetchEvents = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch('/api/calendar/events');
+        if (!res.ok) throw new Error('Failed to fetch events');
+        const data = await res.json();
+        setEvents(Array.isArray(data) ? data : []);
+      } catch (err: any) {
+        setError('Could not load calendar events.');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchEvents();
+  }, []);
+
+  // Map backend events to react-big-calendar format
+  const calendarEvents = useMemo(() =>
+    events.map(ev => ({
+      title: ev.description,
+      start: new Date(ev.event_date),
+      end: new Date(ev.event_date),
+      allDay: true,
+      ...ev
+    })),
+    [events]
   );
-
-  const [selectedConv, setSelectedConv] = useState<any>(null);
 
   return (
     <div style={{ height: 700 }}>
+      {loading && <div>Loading calendar events...</div>}
+      {error && <div style={{ color: 'red' }}>{error}</div>}
       <Calendar
         localizer={localizer}
-        events={events}
+        events={calendarEvents}
         step={60}
         views={allViews}
         defaultView="month"
         defaultDate={new Date()}
-        onSelectEvent={event => setSelectedConv(event.conversation)}
+        onSelectEvent={event => setSelectedEvent(event as CalendarTaskEvent)}
         popup
       />
       <Dialog
-        hidden={!selectedConv}
-        onDismiss={() => setSelectedConv(null)}
+        hidden={!selectedEvent}
+        onDismiss={() => setSelectedEvent(null)}
         dialogContentProps={{
           type: DialogType.normal,
-          title: selectedConv?.title || 'Conversation',
-          subText: `Conversation ID: ${selectedConv?.id}`
+          title: selectedEvent?.description || 'Task/Event',
+          subText: selectedEvent ? `Date: ${selectedEvent.event_date}` : ''
         }}
         modalProps={{
           isBlocking: false
         }}
       >
         <Stack>
-          {selectedConv?.messages?.map((msg: any) => (
-            <div key={msg.id} style={{ marginBottom: 12 }}>
-              <b>{msg.role}:</b>{' '}
-              {typeof msg.content === 'string' ? msg.content : '[complex message]'}
-              <div style={{ fontSize: 12, color: '#888' }}>{msg.date}</div>
+          {selectedEvent && (
+            <div style={{ marginBottom: 12 }}>
+              <b>Description:</b> {selectedEvent.description}<br />
+              <b>Date:</b> {selectedEvent.event_date}<br />
+              {selectedEvent.conversation_id && (
+                <><b>Conversation ID:</b> {selectedEvent.conversation_id}<br /></>
+              )}
+              {selectedEvent.source_message_id && (
+                <><b>Source Message ID:</b> {selectedEvent.source_message_id}<br /></>
+              )}
             </div>
-          ))}
+          )}
         </Stack>
       </Dialog>
     </div>

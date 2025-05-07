@@ -1,4 +1,4 @@
-Here’s the flow:
+# Task Context
 
 After a user sends a message, you fetch recent chat history for that conversation from CosmosDB.
 You send these recent messages to Azure OpenAI (GPT-4o) with a prompt to extract all work-related tasks/events, including their description and date.

@@ -3,6 +3,7 @@ from datetime import datetime
 from azure.cosmos.aio import CosmosClient
 from azure.cosmos import exceptions
   
+  #TODO: This is suppose to be the CosmosDB Repository.
 class CosmosConversationClient():
     
     def __init__(self, cosmosdb_endpoint: str, credential: any, database_name: str, container_name: str, enable_message_feedback: bool = False):
@@ -75,7 +76,6 @@ class CosmosConversationClient():
             return resp
         else:
             return True
-
         
     async def delete_messages(self, conversation_id, user_id):
         ## get a list of all the messages in the conversation
@@ -86,7 +86,6 @@ class CosmosConversationClient():
                 resp = await self.container_client.delete_item(item=message['id'], partition_key=user_id)
                 response_list.append(resp)
             return response_list
-
 
     async def get_conversations(self, user_id, limit, sort_order = 'DESC', offset = 0):
         parameters = [

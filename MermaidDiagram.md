@@ -17,3 +17,11 @@ sequenceDiagram
     Backend->>CosmosDB: Fetch saved events
     Backend-->>Frontend: Return events
     Frontend-->>User: Render events in calendar
+
+    note over Backend: Main Classes Interaction
+    Backend->>+CosmosConversationClient: Save message
+    Backend->>+CosmosConversationClient: Fetch chat history
+    Backend->>+init_openai_client: Initialize LLM client
+    Backend->>+CosmosConversationClient: Save calendar events
+    Backend->>+CosmosConversationClient: Fetch saved events
+```
