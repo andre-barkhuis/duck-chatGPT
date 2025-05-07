@@ -1,5 +1,5 @@
 # Copilot Instructions
-
+- Always check TaskContext.md if you forget or need to think about the task. so you never forget
 ## ✅ Behavior
 
 - After saving a user message, extract events/tasks using Azure OpenAI (GPT-4o)
@@ -27,7 +27,7 @@
 ## 🔐 Access Rules
 
 You may:
--  if asked to start app you are allowed to start the app direcly in terminal, run the virtual envrionment in  `.venv` ./.venv/Scripts/Activate.ps1 and then after run  ./start.cmd to start the backend.
+-  if asked to start app you are allowed to start the app direcly in terminal, run the virtual envrionment in  `.venv` ./.venv/Scripts/Activate.ps1 and only after this is run! not in the same line run  ./start.cmd to start the backend.
 - Modify files under `backend/**` and `frontend/src/**`
 - Read `.env` to access configuration values
 
